@@ -9,14 +9,24 @@
 #include <PMS.h>
 
 uint8_t broadcast_address[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-uint8_t light_address[3][6] = { 
+uint8_t light_address[5][6] = { 
   { 0x5C, 0xCF, 0x7F, 0x3C, 0x1F, 0xAF }, // หน้า
   { 0x5C, 0xCF, 0x7F, 0x3B, 0xCA, 0x53 }, // กลาง
-  { 0x5C, 0xCF, 0x7F, 0x3B, 0xC7, 0x64 }  // หลัง
+  { 0x5C, 0xCF, 0x7F, 0x3B, 0xC7, 0x64 }, // หลัง
+  { 0x5C, 0xCF, 0x7F, 0xF9, 0xA6, 0xA4 }, // ลอยหน้า
+  { 0x5C, 0xCF, 0x7F, 0x3C, 0x21, 0x25 }  // ลอยหลัง
+};
+
+uint8_t door_sensor_address[2][6] = { 
+  { 0x24, 0x6F, 0x28, 0x25, 0xE8, 0x40 } // Door Sensor 1
 };
 
 const char * verify_code_in = "SmartDashboard:";
+const char * verify_code_door_in = "DoorCheck@ArtronShop:";
 const char * verify_code_out = "Sonoff@ArtronShop:";
+
+const char * ssid = "Artron@Kit";
+const char * password = "Kit_Artron";
 
 static const char * TAG = "Main";
 
@@ -31,50 +41,93 @@ void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   ESP_LOGI(TAG, "Last Packet Send Status: %s", status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
 }
 
+typedef struct {
+  uint8_t mac[6];
+  uint8_t *incomingData;
+  int len;
+} NOWMessage;
+
+QueueHandle_t nowQueue;
+
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   ESP_LOGI(TAG, "Data in: %*s", len, incomingData);
   
-  if (len < strlen(verify_code_in)) {
-    ESP_LOGI(TAG, "data invaild ! : %.*s", len, incomingData);
-    return; // skip invaild data
+  NOWMessage data;
+  memcpy(data.mac, mac, 6);
+  data.incomingData = (uint8_t *) malloc(len);
+  if (data.incomingData) {
+    memcpy(data.incomingData, incomingData, len);
+    data.len = len;
+  } else {
+    ESP_LOGE(TAG, "no memory");
+    data.len = 0;
   }
-  
-  if (strncmp(verify_code_in, (char *) incomingData, strlen(verify_code_in)) != 0) {
-    ESP_LOGI(TAG, "verify code invaild ! : %.*s", len, incomingData);
-    return; // skip invaild data
+  if(xQueueSend(nowQueue, (void *) &data, 10) != pdPASS) {
+    ESP_LOGE(TAG, "Send now queue fail");
+  }
+}
+
+void dataInProcess(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  String in_data = "";
+  for (uint8_t i=0;i<len;i++) {
+    in_data += (char) incomingData[i];
   }
 
-  uint8_t * payload = NULL;
-  const uint8_t payload_len = len - strlen(verify_code_in);
-  if (payload_len > 0) {
-    payload = (uint8_t *) &incomingData[strlen(verify_code_in)];
-  }
+  if (in_data.startsWith(verify_code_in)) { // light
+    String payload = in_data.substring(strlen(verify_code_in));
 
-  if (payload_len > 0) {
-    bool output_status = payload[0] == '1';
-    lv_obj_t * ui_light_x_sw[] = {
-      ui_light1_sw,
-      ui_light2_sw,
-      ui_light3_sw,
-    };
-    lv_obj_t * ui_light_x_img[] = {
-      ui_light1_img,
-      ui_light2_img,
-      ui_light3_img,
-    };
-    for (uint8_t i=0;i<3;i++) {
-      if (memcmp(light_address[i], mac, 6) == 0) {
-        if (output_status) {
-          lv_obj_add_state(ui_light_x_sw[i], LV_STATE_CHECKED);
-          lv_obj_add_state(ui_light_x_img[i], LV_STATE_CHECKED);
-        } else {
-          lv_obj_clear_state(ui_light_x_sw[i], LV_STATE_CHECKED);
-          lv_obj_clear_state(ui_light_x_img[i], LV_STATE_CHECKED);
+    if (payload.length() > 0) {
+      bool output_status = payload.toInt() == 1;
+      lv_obj_t * ui_light_x_sw[] = {
+        ui_light1_sw,
+        ui_light2_sw,
+        ui_light3_sw,
+        ui_light4_sw,
+        ui_light5_sw,
+      };
+      lv_obj_t * ui_light_x_img[] = {
+        ui_light1_img,
+        ui_light2_img,
+        ui_light3_img,
+        ui_light4_img,
+        ui_light5_img,
+      };
+      for (uint8_t i=0;i<5;i++) {
+        if (memcmp(light_address[i], mac, 6) == 0) {
+          if (output_status) {
+            lv_obj_add_state(ui_light_x_sw[i], LV_STATE_CHECKED);
+            lv_obj_add_state(ui_light_x_img[i], LV_STATE_CHECKED);
+          } else {
+            lv_obj_clear_state(ui_light_x_sw[i], LV_STATE_CHECKED);
+            lv_obj_clear_state(ui_light_x_img[i], LV_STATE_CHECKED);
+          }
         }
       }
+    } else { // No payload
+      // ---
     }
-  } else { // No payload
-    // ---
+  } else if (in_data.startsWith(verify_code_door_in)) { // door
+    String payload = in_data.substring(strlen(verify_code_door_in));
+    
+    if (payload.length() > 0) {
+      bool output_status = payload.toInt() == 1;
+      lv_obj_t * ui_door_x_status[] = {
+        ui_door1_status,
+        ui_door2_status
+      };
+      for (uint8_t i=0;i<1;i++) {
+        if (memcmp(door_sensor_address[i], mac, 6) == 0) {
+          ESP_LOGI(TAG, "Door %d : %d", i, output_status ? 1 : 0);
+          if (output_status) {
+            lv_obj_add_state(ui_door_x_status[i], LV_STATE_CHECKED);
+          } else {
+            lv_obj_clear_state(ui_door_x_status[i], LV_STATE_CHECKED);
+          }
+        }
+      }
+    } else { // No payload
+      // ---
+    }
   }
 }
 
@@ -125,20 +178,10 @@ void pm_update() {
   }
 }
 
-void wifi_update_timer(lv_timer_t * timer) {
-  if (!WiFi.isConnected()) {
-    if (lv_obj_has_flag(ui_wifi_icon, LV_OBJ_FLAG_HIDDEN)) {
-      lv_obj_clear_flag(ui_wifi_icon, LV_OBJ_FLAG_HIDDEN);
-    } else {
-      lv_obj_add_flag(ui_wifi_icon, LV_OBJ_FLAG_HIDDEN);
-    }
-  } else {
-    lv_obj_clear_flag(ui_wifi_icon, LV_OBJ_FLAG_HIDDEN);
-  }
-}
-
 void setup() {
   Serial.begin(115200);
+
+  nowQueue = xQueueCreate(20, sizeof(NOWMessage));
 
   WiFi.mode(WIFI_MODE_STA);
   /*Serial.print("MAC Address: ");
@@ -160,7 +203,16 @@ void setup() {
   peerInfo.encrypt = false;    
   esp_now_add_peer(&peerInfo);
 
-  for (uint8_t i=0;i<3;i++) {
+  for (uint8_t i=0;i<5;i++) {
+    esp_now_peer_info_t peerInfo;
+    memset(&peerInfo, 0, sizeof(peerInfo));
+    memcpy(peerInfo.peer_addr, light_address[i], 6);
+    peerInfo.channel = 0;  
+    peerInfo.encrypt = false;    
+    esp_now_add_peer(&peerInfo);
+  }
+
+  for (uint8_t i=0;i<1;i++) {
     esp_now_peer_info_t peerInfo;
     memset(&peerInfo, 0, sizeof(peerInfo));
     memcpy(peerInfo.peer_addr, light_address[i], 6);
@@ -188,17 +240,17 @@ void setup() {
   lv_obj_add_event_cb(ui_light1_sw, light_sw_click_handle, LV_EVENT_CLICKED, (void*) 0);
   lv_obj_add_event_cb(ui_light2_sw, light_sw_click_handle, LV_EVENT_CLICKED, (void*) 1);
   lv_obj_add_event_cb(ui_light3_sw, light_sw_click_handle, LV_EVENT_CLICKED, (void*) 2);
+  lv_obj_add_event_cb(ui_light4_sw, light_sw_click_handle, LV_EVENT_CLICKED, (void*) 3);
+  lv_obj_add_event_cb(ui_light5_sw, light_sw_click_handle, LV_EVENT_CLICKED, (void*) 4);
   
   // get last status
   esp_now_send(broadcast_address, (uint8_t *) verify_code_out, strlen(verify_code_out)); 
+  esp_now_send(broadcast_address, (uint8_t *) verify_code_door_in, strlen(verify_code_door_in)); 
   
   // Add sensor read and update to UI
   sensor_update_timer(NULL);
   pm_update();
   lv_timer_create(sensor_update_timer, 1000, NULL);
-  
-  // Add update wifi status timer
-  lv_timer_create(wifi_update_timer, 300, NULL);
 }
 
 void loop() {
@@ -217,13 +269,14 @@ void loop() {
       }
     }
   }
-
-  { // Status icon
-    if (cloud_sending) {
-      lv_obj_clear_flag(ui_upload_icon, LV_OBJ_FLAG_HIDDEN);
-    } else {
-      lv_obj_add_flag(ui_upload_icon, LV_OBJ_FLAG_HIDDEN);
+  
+  {
+    NOWMessage data;
+    if(xQueueReceive(nowQueue, &data, 0) == pdPASS) {
+      dataInProcess(data.mac, data.incomingData, data.len);
+      free(data.incomingData);
     }
   }
+
   delay(10);
 }

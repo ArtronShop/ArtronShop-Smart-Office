@@ -13,9 +13,7 @@
 void ui_Index_screen_init(void);
 lv_obj_t * ui_Index;
 lv_obj_t * ui_topbar;
-lv_obj_t * ui_time_value;
-lv_obj_t * ui_wifi_icon;
-lv_obj_t * ui_upload_icon;
+lv_obj_t * ui_Container7;
 lv_obj_t * ui_Sensor_Group;
 lv_obj_t * ui_Panel5;
 lv_obj_t * ui_Image4;
@@ -37,6 +35,14 @@ lv_obj_t * ui_Label11;
 lv_obj_t * ui_pm10_value;
 lv_obj_t * ui_Label12;
 lv_obj_t * ui_pm100_value;
+lv_obj_t * ui_Binary_Sensor_Group;
+lv_obj_t * ui_sensor_door_group;
+lv_obj_t * ui_door1_status;
+lv_obj_t * ui_door1_label;
+lv_obj_t * ui_door2_status;
+lv_obj_t * ui_door2_label;
+lv_obj_t * ui_pir_status;
+lv_obj_t * ui_pir_label;
 lv_obj_t * ui_Lamp_Group;
 void ui_event_light1_sw(lv_event_t * e);
 lv_obj_t * ui_light1_sw;
@@ -50,6 +56,14 @@ void ui_event_light3_sw(lv_event_t * e);
 lv_obj_t * ui_light3_sw;
 lv_obj_t * ui_Label3;
 lv_obj_t * ui_light3_img;
+void ui_event_light4_sw(lv_event_t * e);
+lv_obj_t * ui_light4_sw;
+lv_obj_t * ui_Label4;
+lv_obj_t * ui_light4_img;
+void ui_event_light5_sw(lv_event_t * e);
+lv_obj_t * ui_light5_sw;
+lv_obj_t * ui_Label6;
+lv_obj_t * ui_light5_img;
 lv_obj_t * ui____initial_actions0;
 
 ///////////////////// TEST LVGL SETTINGS ////////////////////
@@ -85,6 +99,22 @@ void ui_event_light3_sw(lv_event_t * e)
     lv_obj_t * target = lv_event_get_target(e);
     if(event_code == LV_EVENT_VALUE_CHANGED) {
         _ui_state_modify(ui_light3_img, LV_STATE_CHECKED, _UI_MODIFY_STATE_TOGGLE);
+    }
+}
+void ui_event_light4_sw(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    lv_obj_t * target = lv_event_get_target(e);
+    if(event_code == LV_EVENT_VALUE_CHANGED) {
+        _ui_state_modify(ui_light4_img, LV_STATE_CHECKED, _UI_MODIFY_STATE_TOGGLE);
+    }
+}
+void ui_event_light5_sw(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    lv_obj_t * target = lv_event_get_target(e);
+    if(event_code == LV_EVENT_VALUE_CHANGED) {
+        _ui_state_modify(ui_light5_img, LV_STATE_CHECKED, _UI_MODIFY_STATE_TOGGLE);
     }
 }
 
