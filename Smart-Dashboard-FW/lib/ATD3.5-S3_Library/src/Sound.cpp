@@ -59,6 +59,8 @@ void ATD_Sound::play(const void * data, size_t len) {
 static void beep_inp_feedback(lv_indev_drv_t *indev_driver, uint8_t event) {
   if((event == LV_EVENT_CLICKED) || (event == LV_EVENT_KEY)) {
     Sound.play(beep_sound_wave, sizeof(beep_sound_wave));
+    extern unsigned long last_touch_on_display;
+    last_touch_on_display = millis();
   }
 }
 

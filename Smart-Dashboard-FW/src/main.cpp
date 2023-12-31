@@ -36,6 +36,7 @@ PMS::DATA data;
 bool pms_ok = false;
 
 bool cloud_sending = false;
+unsigned long last_touch_on_display = 0;
 
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   ESP_LOGI(TAG, "Last Packet Send Status: %s", status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
@@ -242,7 +243,7 @@ void setup() {
   lv_obj_add_event_cb(ui_light3_sw, light_sw_click_handle, LV_EVENT_CLICKED, (void*) 2);
   lv_obj_add_event_cb(ui_light4_sw, light_sw_click_handle, LV_EVENT_CLICKED, (void*) 3);
   lv_obj_add_event_cb(ui_light5_sw, light_sw_click_handle, LV_EVENT_CLICKED, (void*) 4);
-  
+
   // get last status
   esp_now_send(broadcast_address, (uint8_t *) verify_code_out, strlen(verify_code_out)); 
   esp_now_send(broadcast_address, (uint8_t *) verify_code_door_in, strlen(verify_code_door_in)); 
@@ -270,11 +271,30 @@ void loop() {
     }
   }
   
-  {
+  { // handle ESP-NOW message
     NOWMessage data;
     if(xQueueReceive(nowQueue, &data, 0) == pdPASS) {
       dataInProcess(data.mac, data.incomingData, data.len);
       free(data.incomingData);
+    }
+  }
+
+  { // Display sleep
+    #define LCD_BL_PIN   (3)
+
+    static bool display_enter_to_sleep = false;
+    if ((millis() - last_touch_on_display) > (60 * 1000)) {
+      if (!display_enter_to_sleep) {
+        Display.off();
+        digitalWrite(LCD_BL_PIN, LOW);
+        display_enter_to_sleep = true;
+      }
+    } else {
+      if (display_enter_to_sleep) {
+        Display.on();
+        digitalWrite(LCD_BL_PIN, HIGH);
+        display_enter_to_sleep = false;
+      }
     }
   }
 

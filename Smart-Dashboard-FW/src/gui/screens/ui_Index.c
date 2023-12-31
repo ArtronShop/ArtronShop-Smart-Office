@@ -349,7 +349,6 @@ void ui_Index_screen_init(void)
     lv_obj_set_align(ui_sensor_door_group, LV_ALIGN_CENTER);
     lv_obj_set_flex_flow(ui_sensor_door_group, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(ui_sensor_door_group, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
-    lv_obj_add_flag(ui_sensor_door_group, LV_OBJ_FLAG_CHECKABLE);     /// Flags
     lv_obj_clear_flag(ui_sensor_door_group, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_obj_set_style_radius(ui_sensor_door_group, 50, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_side(ui_sensor_door_group, LV_BORDER_SIDE_NONE, LV_PART_MAIN | LV_STATE_DEFAULT);

@@ -77,10 +77,10 @@ LV_IMG_DECLARE(ui_img_111191404);    // assets\closed-door-with-border-silhouett
 LV_IMG_DECLARE(ui_img_1857898281);    // assets\opened-door-aperture.png
 LV_IMG_DECLARE(ui_img_1821463755);    // assets\bulb-icon.png
 
+LV_FONT_DECLARE(ui_font_Kanit18);
 LV_FONT_DECLARE(ui_font_Kanit24);
 LV_FONT_DECLARE(ui_font_Segment32);
 LV_FONT_DECLARE(ui_font_Segment42);
-LV_FONT_DECLARE(ui_font_Kanit18);
 
 void ui_init(void);
 
