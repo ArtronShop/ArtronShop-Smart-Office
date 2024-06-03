@@ -9,16 +9,18 @@
 #include <PMS.h>
 
 uint8_t broadcast_address[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-uint8_t light_address[5][6] = { 
-  { 0x5C, 0xCF, 0x7F, 0x3C, 0x1F, 0xAF }, // หน้า
-  { 0x5C, 0xCF, 0x7F, 0x3B, 0xCA, 0x53 }, // กลาง
-  { 0x5C, 0xCF, 0x7F, 0x3B, 0xC7, 0x64 }, // หลัง
-  { 0x5C, 0xCF, 0x7F, 0xAF, 0x08, 0x4D }, // ลอยหน้า
-  { 0x5C, 0xCF, 0x7F, 0x3C, 0x21, 0x25 }  // ลอยหลัง
+String broadcast_address_str = "FF:FF:FF:FF:FF:FF";
+String light_address[5] = { 
+  "5C:CF:7F:3C:1F:AF", // หน้า
+  "5C:CF:7F:3B:CA:53", // กลาง
+  "5C:CF:7F:3B:C7:64", // หลัง
+  "5C:CF:7F:AF:08:4D", // ลอยหน้า
+  "5C:CF:7F:3C:21:25", // ลอยหลัง
 };
 
-uint8_t door_sensor_address[2][6] = { 
-  { 0x24, 0x6F, 0x28, 0x25, 0xE8, 0x40 } // Door Sensor 1
+String door_sensor_address[2] = { 
+  "24:6F:28:25:E8:40", // Door Sensor 1
+  ""
 };
 
 const char * verify_code_in = "SmartDashboard:";
@@ -37,6 +39,35 @@ bool pms_ok = false;
 
 bool cloud_sending = false;
 unsigned long last_touch_on_display = 0;
+
+// format: <Sender MAC Address>,<Receiver MAC Address>,<Command>,<Payload>
+String encode_packet(String receiver_mac, int command, String payload) {
+  String sender_mac = WiFi.macAddress();
+  sender_mac.toUpperCase();
+  return sender_mac + "," + receiver_mac + "," + String(command) + "," + payload;
+}
+
+bool decode_packet(String packet, String *sender_mac, String *receiver_mac, int *command, String *payload) {
+  char buff_sender_mac[30], buff_receiver_mac[30], buff_payload[100];
+  memset(buff_sender_mac, 0, sizeof(buff_sender_mac));
+  memset(buff_receiver_mac, 0, sizeof(buff_receiver_mac));
+  memset(buff_payload, 0, sizeof(buff_payload));
+
+  // ESP_LOGI(TAG, "Packet: %s", packet.c_str());
+
+  if (sscanf(packet.c_str(), "%[^,],%[^,],%d,%[^,]", buff_sender_mac, buff_receiver_mac, command, buff_payload) < 3) {
+    return false;
+  }
+
+  *sender_mac = buff_sender_mac;
+  *receiver_mac = buff_receiver_mac;
+  *payload = buff_payload;
+
+  sender_mac->toUpperCase();
+  receiver_mac->toUpperCase();
+
+  return true;
+}
 
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   ESP_LOGI(TAG, "Last Packet Send Status: %s", status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
@@ -69,15 +100,20 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
 }
 
 void dataInProcess(const uint8_t * mac, const uint8_t *incomingData, int len) {
-  String in_data = "";
-  for (uint8_t i=0;i<len;i++) {
-    in_data += (char) incomingData[i];
+  String packet = "";
+  for (uint16_t i=0;i<len;i++) {
+    packet += (char) incomingData[i];
   }
 
-  if (in_data.startsWith(verify_code_in)) { // light
-    String payload = in_data.substring(strlen(verify_code_in));
+  String sender_mac, receiver_mac, payload;
+  int command;
+  if (decode_packet(packet, &sender_mac, &receiver_mac, &command, &payload)) {
+    ESP_LOGI(TAG, "Sender: %s, Recv: %s, CMD: %d, Payload: %s", sender_mac.c_str(), receiver_mac.c_str(), command, payload.c_str());
+    if (receiver_mac != WiFi.macAddress() && receiver_mac != broadcast_address_str) {
+      return; // Skip if receiver mac is not self mac address or broadcast address
+    }
 
-    if (payload.length() > 0) {
+    if (command == 2) { // 2: Light bulb status report
       bool output_status = payload.toInt() == 1;
       lv_obj_t * ui_light_x_sw[] = {
         ui_light1_sw,
@@ -94,7 +130,7 @@ void dataInProcess(const uint8_t * mac, const uint8_t *incomingData, int len) {
         ui_light5_img,
       };
       for (uint8_t i=0;i<5;i++) {
-        if (memcmp(light_address[i], mac, 6) == 0) {
+        if (light_address[i] == sender_mac) {
           if (output_status) {
             lv_obj_add_state(ui_light_x_sw[i], LV_STATE_CHECKED);
             lv_obj_add_state(ui_light_x_img[i], LV_STATE_CHECKED);
@@ -104,20 +140,14 @@ void dataInProcess(const uint8_t * mac, const uint8_t *incomingData, int len) {
           }
         }
       }
-    } else { // No payload
-      // ---
-    }
-  } else if (in_data.startsWith(verify_code_door_in)) { // door
-    String payload = in_data.substring(strlen(verify_code_door_in));
-    
-    if (payload.length() > 0) {
+    } else if (command == 2) { // 4: Door sensor status report
       bool output_status = payload.toInt() == 1;
       lv_obj_t * ui_door_x_status[] = {
         ui_door1_status,
         ui_door2_status
       };
       for (uint8_t i=0;i<1;i++) {
-        if (memcmp(door_sensor_address[i], mac, 6) == 0) {
+        if (door_sensor_address[i] == sender_mac) {
           ESP_LOGI(TAG, "Door %d : %d", i, output_status ? 1 : 0);
           if (output_status) {
             lv_obj_add_state(ui_door_x_status[i], LV_STATE_CHECKED);
@@ -135,10 +165,18 @@ void dataInProcess(const uint8_t * mac, const uint8_t *incomingData, int len) {
 void light_sw_click_handle(lv_event_t * e) {
   lv_obj_t * target = lv_event_get_target(e);
   int i = (int) lv_event_get_user_data(e);
-  uint8_t data[strlen(verify_code_out) + 1];
-  memcpy(data, verify_code_out, strlen(verify_code_out));
-  data[strlen(verify_code_out)] = lv_obj_has_state(target, LV_STATE_CHECKED) ? '1' : '0';
-  esp_now_send(light_address[i], data, sizeof(data));
+  String packet = encode_packet(light_address[i], 1, lv_obj_has_state(target, LV_STATE_CHECKED) ? "1" : "0"); // 1: Control light bulb
+  esp_now_send(broadcast_address, (uint8_t *) packet.c_str(), packet.length());
+}
+
+void report_temp_humi(String payload) {
+  static unsigned long timer = 0;
+  if ((timer == 0) || ((millis() - timer) >= 5000) || (millis() < timer)) {
+    String packet = encode_packet(broadcast_address_str, 6, payload); // 6: Temperature & Humidity sensor status report
+    // ESP_LOGI(TAG, "packet = %*s", packet.length(), packet.c_str());
+    esp_now_send(broadcast_address, (uint8_t *) packet.c_str(), packet.length()); 
+    timer = millis();
+  }
 }
 
 int count_of_error = 0;
@@ -147,9 +185,12 @@ void sensor_update_timer(lv_timer_t * timer) {
   if (!sensor_ready) {
     lv_label_set_text(ui_temp_value, "");
     lv_label_set_text(ui_humi_value, "");
+
     if (sht3x.begin()) {
       sensor_ready = true;
     } else {
+      report_temp_humi("-99,-99");
+
       count_of_error++;
       if (count_of_error > 5) {
         Wire.begin(); // Fixed I2C bus error
@@ -162,20 +203,35 @@ void sensor_update_timer(lv_timer_t * timer) {
   if (sht3x.measure()) {
     lv_label_set_text_fmt(ui_temp_value, "%.01f", sht3x.temperature());
     lv_label_set_text_fmt(ui_humi_value, "%.01f", sht3x.humidity());
+
+    report_temp_humi(String(sht3x.temperature(), 1) + "," + String(sht3x.humidity(), 1));
+    sensor_ready = true;
   } else {
     sensor_ready = false;
   }
 }
 
 void pm_update() {
+  String payload = "";
   if (pms_ok) {
     lv_label_set_text_fmt(ui_pm25_value, "%d", data.PM_AE_UG_2_5);
     lv_label_set_text_fmt(ui_pm10_value, "%d", data.PM_AE_UG_1_0);
     lv_label_set_text_fmt(ui_pm100_value, "%d", data.PM_AE_UG_10_0);
+    payload = String(data.PM_AE_UG_2_5) + "," + String(data.PM_AE_UG_1_0) + "," + String(data.PM_AE_UG_10_0);
   } else {
     lv_label_set_text(ui_pm25_value, "");
     lv_label_set_text(ui_pm10_value, "");
     lv_label_set_text(ui_pm100_value, "");
+    payload = "-99,-99,-99";
+  }
+
+  {
+    static unsigned long timer = 0;
+    if ((timer == 0) || ((millis() - timer) >= 5000) || (millis() < timer)) {
+      String packet = encode_packet(broadcast_address_str, 8, payload); // 8: PM sensor status report
+      esp_now_send(broadcast_address, (uint8_t *) packet.c_str(), packet.length()); 
+      timer = millis();
+    }
   }
 }
 
@@ -185,8 +241,7 @@ void setup() {
   nowQueue = xQueueCreate(20, sizeof(NOWMessage));
 
   WiFi.mode(WIFI_MODE_STA);
-  /*Serial.print("MAC Address: ");
-  Serial.println(WiFi.macAddress());*/
+  ESP_LOGI(TAG, "MAC Address: %s", WiFi.macAddress().c_str());
   
   // Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
@@ -204,24 +259,6 @@ void setup() {
   peerInfo.encrypt = false;    
   esp_now_add_peer(&peerInfo);
 
-  for (uint8_t i=0;i<5;i++) {
-    esp_now_peer_info_t peerInfo;
-    memset(&peerInfo, 0, sizeof(peerInfo));
-    memcpy(peerInfo.peer_addr, light_address[i], 6);
-    peerInfo.channel = 0;  
-    peerInfo.encrypt = false;    
-    esp_now_add_peer(&peerInfo);
-  }
-
-  for (uint8_t i=0;i<1;i++) {
-    esp_now_peer_info_t peerInfo;
-    memset(&peerInfo, 0, sizeof(peerInfo));
-    memcpy(peerInfo.peer_addr, light_address[i], 6);
-    peerInfo.channel = 0;  
-    peerInfo.encrypt = false;    
-    esp_now_add_peer(&peerInfo);
-  }
-  
   // Setup peripherals
   Display.begin(0); // rotation number 0
   Touch.begin();
@@ -245,8 +282,12 @@ void setup() {
   lv_obj_add_event_cb(ui_light5_sw, light_sw_click_handle, LV_EVENT_CLICKED, (void*) 4);
 
   // get last status
-  esp_now_send(broadcast_address, (uint8_t *) verify_code_out, strlen(verify_code_out)); 
-  esp_now_send(broadcast_address, (uint8_t *) verify_code_door_in, strlen(verify_code_door_in)); 
+  String packet;
+  packet = encode_packet(broadcast_address_str, 3, ""); // 3: Require light bulb status
+  esp_now_send(broadcast_address, (uint8_t *) packet.c_str(), packet.length()); 
+
+  packet = encode_packet(broadcast_address_str, 5, ""); // 5: Require door sensor status
+  esp_now_send(broadcast_address, (uint8_t *) packet.c_str(), packet.length()); 
   
   // Add sensor read and update to UI
   sensor_update_timer(NULL);
@@ -267,6 +308,7 @@ void loop() {
       if ((millis() - last_work) > 2000) {
         pms_ok = false;
         pm_update();
+        last_work = millis();
       }
     }
   }

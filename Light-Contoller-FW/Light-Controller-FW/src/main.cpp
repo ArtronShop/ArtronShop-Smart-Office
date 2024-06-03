@@ -9,9 +9,8 @@
 #define RELAY_PIN (12)
 
 
-uint8_t broadcastAddress[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-const char * verify_code_in = "Sonoff@ArtronShop:";
-const char * verify_code_out = "SmartDashboard:";
+uint8_t broadcast_address[] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+String broadcast_address_str = "FF:FF:FF:FF:FF:FF";
 
 static const char * TAG = "Main";
 
@@ -25,32 +24,60 @@ bool output_status = false;
 bool skip_write_eeprom = false;
 bool req_send_status = false;
 
+// format: <Sender MAC Address>,<Receiver MAC Address>,<Command>,<Payload>
+String encode_packet(String receiver_mac, int command, String payload) {
+  String sender_mac = WiFi.macAddress();
+  sender_mac.toUpperCase();
+  return sender_mac + "," + receiver_mac + "," + String(command) + "," + payload;
+}
+
+bool decode_packet(String packet, String *sender_mac, String *receiver_mac, int *command, String *payload) {
+  char buff_sender_mac[30], buff_receiver_mac[30], buff_payload[100];
+  memset(buff_sender_mac, 0, sizeof(buff_sender_mac));
+  memset(buff_receiver_mac, 0, sizeof(buff_receiver_mac));
+  memset(buff_payload, 0, sizeof(buff_payload));
+
+  // ESP_LOGI(TAG, "Packet: %s", packet.c_str());
+
+  if (sscanf(packet.c_str(), "%[^,],%[^,],%d,%[^,]", buff_sender_mac, buff_receiver_mac, command, buff_payload) < 3) {
+    return false;
+  }
+
+  *sender_mac = buff_sender_mac;
+  *receiver_mac = buff_receiver_mac;
+  *payload = buff_payload;
+
+  sender_mac->toUpperCase();
+  receiver_mac->toUpperCase();
+
+  return true;
+}
+
 void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
   ESP_LOGI(TAG, "Last Packet Send Status: %s", sendStatus == 0 ? "OK" : "FAIL");
 }
 
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
-  if (len < strlen(verify_code_in)) {
-    ESP_LOGI(TAG, "data invaild ! : %.*s", len, incomingData);
-    return; // skip invaild data
-  }
-  
-  if (strncmp(verify_code_in, (char *) incomingData, strlen(verify_code_in)) != 0) {
-    ESP_LOGI(TAG, "verify code invaild ! : %.*s", len, incomingData);
-    return; // skip invaild data
+  String packet = "";
+  for (uint16_t i=0;i<len;i++) {
+    packet += (char) incomingData[i];
   }
 
-  uint8_t * payload = NULL;
-  const uint8_t payload_len = len - strlen(verify_code_in);
-  if (payload_len > 0) {
-    payload = &incomingData[strlen(verify_code_in)];
-  }
+  String sender_mac, receiver_mac, payload;
+  int command;
+  if (decode_packet(packet, &sender_mac, &receiver_mac, &command, &payload)) {
+    ESP_LOGI(TAG, "Sender: %s, Recv: %s, CMD: %d, Payload: %s", sender_mac.c_str(), receiver_mac.c_str(), command, payload.c_str());
+    if (receiver_mac != WiFi.macAddress() && receiver_mac != broadcast_address_str) {
+      return; // Skip if receiver mac is not self mac address or broadcast address
+    }
 
-  if (payload_len > 0) {
-    output_status = payload[0] == '1';
-  } else { // No payload
-    // Send now status
-    req_send_status = true;
+    if (command == 1) { // 1: Control light bulb
+      output_status = payload[0] == '1';
+      req_send_status = true;
+    } else if (command == 3) { // 3: Require light bulb status
+      // Send now status
+      req_send_status = true;
+    }
   }
 }
 
@@ -69,9 +96,7 @@ void setup() {
   output_status = EEPROM.read(0) == 1;
   skip_write_eeprom = true;
 
-  Serial.println();
-  Serial.print("MAC Address: ");
-  Serial.println(WiFi.macAddress());
+  ESP_LOGI(TAG, "MAC Address: %s", WiFi.macAddress().c_str());
 
   // Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
@@ -87,7 +112,7 @@ void setup() {
   esp_now_register_recv_cb(OnDataRecv);
   
   // Register peer
-  esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
+  esp_now_add_peer(broadcast_address, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
 
   req_send_status = true; // Send status in first time
 }
@@ -109,10 +134,9 @@ void loop() {
   }
 
   if (req_send_status) {
-    uint8_t data[strlen(verify_code_out) + 1];
-    memcpy(data, verify_code_out, strlen(verify_code_out));
-    data[strlen(verify_code_out)] = output_status ? '1' : '0';
-    esp_now_send(broadcastAddress, data, sizeof(data));
+    String packet = encode_packet(broadcast_address_str, 2, output_status ? "1" : "0"); // 2: Light bulb status report
+    esp_now_send(broadcast_address, (uint8_t *) packet.c_str(), packet.length()); 
+
     req_send_status = false;
   }
 
